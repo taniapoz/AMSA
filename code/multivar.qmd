@@ -1,0 +1,361 @@
+---
+title: "Multivariate"
+format: html
+---
+
+
+
+# Setup  
+```{r}
+library(tidyverse)
+library(ggcorrplot)
+library(broom)
+library(car)
+library(factoextra)
+library(ggpmisc)
+```
+
+```{r}
+samples <- read_csv("../data/Samples.csv")
+
+samples
+```
+
+
+```{r correlation matrix p-values}
+# Estimating significance matrix
+p.mat <- samples %>%
+  dplyr::select(-c(1:3)) %>%
+  cor_pmat()
+
+p.mat
+```
+
+
+```{r correlation matrix plot}
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  cor() %>%
+  ggcorrplot(hc.order = TRUE, 
+             digits = 1,
+             type = "lower", 
+             p.mat = p.mat, 
+             sig.level = 0.05,
+             insig = "blank",
+             lab = TRUE)
+```
+
+
+```{r highest correlations}
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  cor() %>% # calculates r (-1 to 1)
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  pivot_longer(cols = -rowname) %>%
+  filter(abs(value) > .85 & value != 1) %>%
+  arrange(desc(value)) %>%
+  distinct(value, .keep_all = T)
+
+```
+
+```{r lowest correlations}
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  cor() %>% # calculates r (-1 to 1)
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  pivot_longer(cols = -rowname) %>%
+  filter(abs(value) < .05 & value != 1) %>%
+  arrange(abs(value)) %>%
+  distinct(value, .keep_all = T)
+
+```
+
+  
+
+```{r r2}
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  pivot_longer(cols=-class) %>%
+  group_by(name) %>%
+  nest() %>%
+  mutate(r2 = map_dbl(data,
+                  ~lm(class ~ value,
+                      data = .x) %>%
+                    glance(.) %>%
+                    pull(r.squared)
+                  )) %>%
+  arrange(desc(r2))
+```
+
+```{r r2 plot}
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  pivot_longer(cols=-class) %>%
+  group_by(name) %>%
+  nest() %>%
+  mutate(r2 = map_dbl(data,
+                  ~lm(class ~ value,
+                      data = .x) %>%
+                    glance(.) %>%
+                    pull(r.squared)
+                  )) %>%
+  arrange(desc(r2)) %>%
+  ungroup() %>%
+  slice(1:6) %>% 
+  unnest(data) %>%
+  ggplot(aes(x = value, 
+             y = class))+
+  geom_point(shape = 21, 
+             alpha = .7, 
+             fill = "purple")+
+  geom_smooth(method = "lm", 
+              se = F, 
+              color = "black", 
+              linewidth = 1)+
+  facet_wrap(~name, 
+             scales = "free_x", 
+             ncol=2) 
+
+```
+
+# PCA 
+
+```{r selecting only numerical vars}
+samples_n <- samples %>%
+  dplyr::select((-c(1:3)),-44)
+
+samples_n
+```
+
+
+```{r pca model}
+mod_pca <- prcomp(samples_n, scale. = T)
+mod_pca
+
+summary(mod_pca)
+```
+
+## Choosing number of PCs  
+Based on scree plot (total variance):  
+```{r pca checking number of components}
+# Scree plot
+fviz_eig(mod_pca,
+         
+         addlabels = T)
+```
+    
+PCs 1 and 2 explain ~58.7% and ~14.1% (72.8%) of total variance.
+
+Number of PCs to explain 70% of total variance 
+```{r PCs to explain 70pct variance}
+mod_pca %>%
+  get_eig() %>%
+  mutate(pc = 1:nrow(.)) %>%
+  ggplot(aes(x = pc,
+         y = cumulative.variance.percent)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 70)
+
+```
+    
+We would need 2 PCs.  
+  
+
+## Inspecting PCs  
+
+```{r PC1 loadings}
+mod_pca$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "var") %>%
+  ggplot(aes(x = reorder(var,desc(PC1)), 
+             y = PC1))+
+  geom_bar(stat = "identity", 
+           aes(fill = PC1), 
+           show.legend = F)+
+  scale_fill_gradient(low = "red", high = "blue")+
+  theme(axis.text.x = element_text(angle = 45, 
+                                   hjust = 1))
+
+```
+
+B05N contributed most to PC1
+
+
+```{r variables contributing to PC1}
+fviz_contrib(mod_pca,
+             choice = "var",
+             axes = 1
+             )
+```
+  (red line is averall average contribution)
+
+Eigenvectors for both PCs 1 and 2 variables:  
+```{r pca variable contribution }
+fviz_pca_var(mod_pca, 
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE,     # Avoid text overlapping
+             select.var = list(contrib = 5)
+             )
+
+```
+
+
+PC1 vs PC2 scores, looking forgroupings:
+
+```{r PC1 vs PC2}
+fviz_pca_ind(mod_pca,
+             label = F)
+```
+  
+Groups might exist.
+
+
+Adding 1 and 2 PCs to original dataset and run a regression versus "class"    
+
+```{r pca scores}
+# Extract first 2 PCs scores
+pca_scores <- mod_pca$x %>%
+  as.data.frame() %>%
+  dplyr::select(PC1:PC2)
+
+pca_scores
+```
+
+```{r pca regression}
+# Adding PCs 1 and 2 scores to original data set
+samples_postpca <- samples %>%
+  bind_cols(pca_scores)
+
+# Regression of class ~ PCs
+
+lm_pca <- lm(class ~ PC1 + PC2,
+             data = samples_postpca)
+
+# Summary  
+summary(lm_pca)
+```
+PC1 have a significant effect in class
+
+```{r pca regression}
+# Checking VIF (variance inflation vactor)
+vif(lm_pca)
+```
+PCs not multicollinear (VIF=1).  
+
+```{r pca regression plots}
+# Plotting strength vs PC1
+ggplot(samples_postpca,
+       aes(x = PC1,
+           y = class)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+
+```{r pca regression plots}
+# Plotting strength vs PC2
+ggplot(samples_postpca, 
+       aes(x = PC2, y = class))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+```
+
+Only PC1 explained class  
+
+# k-means  
+
+```{r}
+# normalizing the data
+samples_norm <- samples_n %>%
+  mutate(across(everything(), ~scale(.x)))
+
+samples_norm
+
+summary(samples_norm)
+```
+
+
+```{r kmeans model }
+mod_km <- kmeans(samples_norm,
+                 centers = 6,
+                 nstart = 10)
+
+mod_km
+```
+6 centers explain 70.9%
+
+Objective way to select the value of k  
+
+```{r choosing k - total error}
+# Total error x k
+fviz_nbclust(samples_norm,
+             method = "wss",
+             k.max = 10,
+             FUNcluster = kmeans)
+```
+
+
+```{r choosing k - silhouette}
+# Silhouette width
+fviz_nbclust(samples_norm, 
+             method = "s",
+             k.max = 10,
+             FUNcluster = kmeans) 
+
+```
+
+total error: k= 3-4
+silhouette: k= 3
+
+Let's go with XXXX clusters.  
+
+```{r mod_km3 }
+mod_km3 <- kmeans(samples_norm,
+                  centers = 3,
+                  nstart = 10)
+
+mod_km3
+```
+
+Number of observations per cluster
+```{r}
+samples %>%
+  mutate(cluster = mod_km3$cluster) %>%
+  group_by(cluster) %>%
+  tally()
+
+```
+
+
+
+```{r cluster x variable boxplots}
+samples %>%
+  mutate(cluster = mod_km3$cluster,
+         cluster = factor(cluster)) %>%
+  pivot_longer(!c(x, y, cluster)) %>%
+  ggplot(aes(x = cluster, 
+             y = value, 
+             color = cluster))+
+    geom_boxplot(show.legend = F)+
+  facet_wrap(~name, scales = "free_y", ncol = 6)
+
+ggsave("../output/clustervalidation.png",
+       width = 10,
+       height = 20)   
+
+```
+
+```{r kmeans PCA plot}
+fviz_cluster(mod_km3,
+             data = samples_norm)
+```
+  
+
+
+
+
+  
