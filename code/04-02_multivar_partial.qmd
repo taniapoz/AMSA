@@ -3,96 +3,10 @@ title: "Multivariate"
 format: html
 ---
 
-# Learning objectives  
-Our learning objectives are to:  
 
-  - Explore what is and when to use multivariate analysis  
-  - Explore different types of multivariate analysis  
-  - Import our feature-engineered weather data set to be analyzed  
-  - Understand what is multicollinearity, its effects, implications, and remedies   
-  - Run principal component analysis (PCA) for dimensionality reduction  
-  - Run k-means for clustering  
-
-# Introduction  
-## Terminology  
-
-In the following general equation:  
-
-    y ~ x
-
-Y is normally referred to as:  
-  - Response variable  
-  - Dependent variable  
-  - Predicted variable  
-
-X is normally referred to as:  
-  - Explanatory variable  
-  - Independent variable  
-  - Predictor variable  
-
-## What is multivariate analysis?  
-
-Most common: multiple Xs (predictors)  
-
-               y ~ x1 + x2 + .... xn  
-               yield ~ precip + temp + som + hybrid  
-    
-Perhaps multiple Xs (predictors) without a Y (outcome)  
-
-              ~ x1 + x2 + .... xn
-
-While some can have multiple Ys (outcomes)  
-
-               y1 + y2 ~ x1 + x2 (MANOVA)  
-               yield + biomass ~ precip + temp  
-  
-## When to use multivariate?  
-When multiple predictors can be used to explain an outcome.  
-
-When multiple predictors can be used to create data-driven groups (clusters).  
-
-Commonly not a "designed experiment" analysis, but an exploratory relationship approach.  
-
-## Main types of multivariate  
-- Dimensionality reduction  
-    - **Principal component analysis (PCA)**  
-    - Principal coordinate analysis (PCoA)  
-    - Factor analysis  
-    
-- Clustering 
-    - **k-means**, c-means, x-means  
-    - Non-numerical multidimensional scaling  
-    - nearest neighbor  
-  
-- Relationship between variables / Prediction  
-  - Multiple linear regression/stepwise regression  
-  - **Random forest**    
-  - **Conditional inference tree**  
-
-## A few ways to characterize multivariate analysis  
-- Based on analysis goal:  
-
-  - Decrease number of dimensions  
-  - Create clusters  
-  - Establish significant relationships among multiple predictors and an outcome.  
-
-- Based on Y (outcome) existence:
-    - Supervised  
-    - Unsupervised  
-
-- If Y exists, based on its type:  
-    - Categorical: classification  
-    - Numerical: regression  
 
 # Setup  
 ```{r}
-#| message: false
-#| warning: false
-
-#install.packages("ggcorrplot")
-#install.packages("factoextra")
-#install.packages("ggpmisc")
-
 library(tidyverse)
 library(ggcorrplot)
 library(broom)
@@ -102,9 +16,9 @@ library(ggpmisc)
 ```
 
 ```{r}
-weather <- read_csv("../data/weather_monthsum.csv")
+samples <- read_csv("../data/Samples.csv")
 
-weather
+samples
 ```
 
 
@@ -114,8 +28,8 @@ How are variables related? Any strong correlations that we should watch out for?
 Let's create a correlation matrix
 ```{r correlation matrix p-values}
 # Estimating significance matrix
-p.mat <- weather %>%
-  dplyr::select(-year, -site) %>%
+p.mat <- samples %>%
+  dplyr::select(-c(1:3)) %>%
   cor_pmat()
 
 p.mat
@@ -123,8 +37,8 @@ p.mat
 
 Plotting  
 ```{r correlation matrix plot}
-weather %>%
-  dplyr::select(-year, -site) %>%
+samples %>%
+  dplyr::select(-c(1:3)) %>%
   cor() %>%
   ggcorrplot(hc.order = TRUE, 
              digits = 1,
@@ -135,16 +49,16 @@ weather %>%
              lab = TRUE)
 
 ggsave("../output/corrmat.png",
-       height = 25,
-       width = 22,
+       height = 33,
+       width = 30,
        bg = "white")
 ```
 
 A bit difficult to see because we have so many predictors, let's extract in table format.  
 
 ```{r highest correlations}
-weather %>%
-  dplyr::select(-year, -site) %>%
+samples %>%
+  dplyr::select(-c(1:3)) %>%
   cor() %>% # calculates r (-1 to 1)
   as.data.frame() %>%
   rownames_to_column() %>%
@@ -156,8 +70,8 @@ weather %>%
 ```
 
 ```{r lowest correlations}
-weather %>%
-  dplyr::select(-year, -site) %>%
+samples %>%
+  dplyr::select(-c(1:3)) %>%
   cor() %>% # calculates r (-1 to 1)
   as.data.frame() %>%
   rownames_to_column() %>%
@@ -171,13 +85,13 @@ weather %>%
 How do variables relate to fiber strength in a bivariate relationship?  
 
 ```{r r2}
-weather %>%
-  dplyr::select(-site, -year) %>%
-  pivot_longer(cols=-strength_gtex) %>%
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  pivot_longer(cols=-class) %>%
   group_by(name) %>%
   nest() %>%
   mutate(r2 = map_dbl(data,
-                  ~lm(strength_gtex ~ value,
+                  ~lm(class ~ value,
                       data = .x) %>%
                     glance(.) %>%
                     pull(r.squared)
@@ -188,13 +102,13 @@ weather %>%
 ```
 
 ```{r r2 plot}
-weather %>%
-  dplyr::select(-site, -year) %>%
-  pivot_longer(cols=-strength_gtex) %>%
+samples %>%
+  dplyr::select(-c(1:3)) %>%
+  pivot_longer(cols=-class) %>%
   group_by(name) %>%
   nest() %>%
   mutate(r2 = map_dbl(data,
-                  ~lm(strength_gtex ~ value,
+                  ~lm(class ~ value,
                       data = .x) %>%
                     glance(.) %>%
                     pull(r.squared)
@@ -204,7 +118,7 @@ weather %>%
   slice(1:6) %>% 
   unnest(data) %>%
   ggplot(aes(x = value, 
-             y = strength_gtex))+
+             y = class))+
   geom_point(shape = 21, 
              alpha = .7, 
              fill = "purple")+
@@ -386,10 +300,10 @@ Some analysis do the normalization for you (like PCA), and others don't (like k-
 
 Since both PCA and k-means only take numerical variables, let's select them now.  
 ```{r selecting only numerical vars}
-weather_n <- weather %>%
-  dplyr::select(-c(year:strength_gtex))
+samples_n <- samples %>%
+  dplyr::select((-c(1:3)),-44)
 
-weather_n
+samples_n
 ```
 
 # PCA  
@@ -422,7 +336,7 @@ knitr::include_graphics("https://miro.medium.com/v2/resize:fit:1200/1*V4H3Cu8qGr
 Let's run PCA for our weather data.  
 
 ```{r pca model}
-mod_pca <- prcomp(weather_n, scale. = T)
+mod_pca <- prcomp(samples_n, scale. = T)
 mod_pca
 
 summary(mod_pca)
@@ -437,7 +351,7 @@ fviz_eig(mod_pca,
          addlabels = T)
 ```
     
-PCs 1 and 2 explain ~35% and ~26% (61%) of total variance.
+PCs 1 and 2 explain ~58.7% and ~14.1% (72.8%) of total variance.
 This indicates that original variables were correlated (as we expected).   
 
 If wanted to use enough PCs to explain 70% of total variance, how many would we need?  
@@ -452,8 +366,7 @@ mod_pca %>%
 
 ```
     
-We would need 4 PCs.  
-Normally we wish to use 2-3 PCs, but 4 is certainly better than 72 original variables.  
+We would need 2 PCs.  
 
 ## Inspecting PCs  
 Let's inspect PC1 through the loadings (weights) of each variable towards it.  
@@ -476,7 +389,7 @@ mod_pca$rotation %>%
 
 Which variables contributed most to PC1, regardless of direction? 
 
-Mean day length
+B05n
 
 ```{r variables contributing to PC1}
 fviz_contrib(mod_pca,
@@ -505,10 +418,7 @@ Let's plot PC1 vs PC2 scores, look for any groupings.
 fviz_pca_ind(mod_pca,
              label = F)
 ```
-  
-Appears that some groups exist.  
-
-
+Some grouping might exist
 What did we learn?  
 
 - Some original variables strongly correlated  
@@ -522,25 +432,25 @@ Let's add the first 4 PCs to our original dataset and run a regression versus gr
 # Extract first 4 PCs scores
 pca_scores <- mod_pca$x %>%
   as.data.frame() %>%
-  dplyr::select(PC1:PC4)
+  dplyr::select(PC1:PC2)
 
 pca_scores
 ```
 
 ```{r pca regression}
 # Adding PCs 1-4 scores to original data set
-weather_postpca <- weather %>%
+samples_postpca <- samples %>%
   bind_cols(pca_scores)
 
 # Regression of yield ~ PCs
 
-lm_pca <- lm(strength_gtex ~ PC1 + PC2 + PC3 + PC4,
-             data = weather_postpca)
+lm_pca <- lm(class ~ PC1 + PC2,
+             data = vi_postpca)
 
 # Summary  
 summary(lm_pca)
 ```
-PC2 and PC3 have a significant effect in strength
+PC1 have a significant effect in strength
 
 ```{r pca regression}
 # Checking VIF (variance inflation vactor)
@@ -549,18 +459,18 @@ vif(lm_pca)
 
 ```{r pca regression plots}
 # Plotting strength vs PC1
-ggplot(weather_postpca,
+ggplot(vi_postpca,
        aes(x = PC1,
-           y = strength_gtex)) +
+           y = class)) +
   geom_point() +
   geom_smooth(method = "lm")
 ```
-no relationship, as we would expect
+
 
 ```{r pca regression plots}
 # Plotting strength vs PC2
-ggplot(weather_postpca, 
-       aes(x = PC2, y = strength_gtex))+
+ggplot(vi_postpca, 
+       aes(x = PC2, y = class))+
   geom_point()+
   geom_smooth(method = "lm")
 
@@ -569,14 +479,14 @@ ggplot(weather_postpca,
 
 ```{r pca regression plots}
 # Plotting strength vs PC3
-ggplot(weather_postpca, 
-       aes(x = PC3, y = strength_gtex))+
+ggplot(vi_postpca, 
+       aes(x = PC3, y = class))+
   geom_point()+
   geom_smooth(method = "lm")
 
 ```
 
-Only PCs 2 and 3 explained strength (look at which variables were most important to each PC for interpretation).  
+Only 1 explained class (look at which variables were most important to each PC for interpretation).  
 
 As expected, PCs were not multicollinear (VIF=1).  
 
@@ -615,12 +525,12 @@ k-means does not normalize our data for us like PCA did, so we will need to do t
 
 ```{r}
 # normalizing the data
-weather_norm <- weather_n %>%
+vi_norm <- vi_n %>%
   mutate(across(everything(), ~scale(.x)))
 
-weather_norm
+vi_norm
 
-summary(weather_norm)
+summary(vi_norm)
 ```
 
 Also, we need to define the number of clusters we want.  
@@ -628,7 +538,7 @@ Any thoughts?
 Let's try 2.  
 
 ```{r kmeans model }
-mod_km <- kmeans(weather_norm,
+mod_km <- kmeans(vi_norm,
                  centers = 6,
                  nstart = 10)
 
@@ -639,7 +549,7 @@ Since the choice of k can be subjective, we will need to find an objective way t
 
 ```{r choosing k - total error}
 # Total error x k
-fviz_nbclust(weather_norm,
+fviz_nbclust(vi_norm,
              method = "wss",
              k.max = 10,
              FUNcluster = kmeans)
@@ -648,7 +558,7 @@ fviz_nbclust(weather_norm,
 
 ```{r choosing k - silhouette}
 # Silhouette width
-fviz_nbclust(weather_norm, 
+fviz_nbclust(vi_norm, 
              method = "s",
              k.max = 10,
              FUNcluster = kmeans) 
@@ -656,13 +566,13 @@ fviz_nbclust(weather_norm,
 ```
 
 total error: k=3-4  
-silhouette: k=4  
+silhouette: k=3  
 
 Let's go with 4 clusters.  
 
 ```{r mod_km4 }
-mod_km4 <- kmeans(weather_norm,
-                  centers = 4,
+mod_km4 <- kmeans(vi_norm,
+                  centers = 3,
                   nstart = 10)
 
 mod_km4
@@ -670,7 +580,7 @@ mod_km4
 
 How many observations per cluster?
 ```{r}
-weather %>%
+vi %>%
   mutate(cluster = mod_km4$cluster) %>%
   group_by(cluster) %>%
   tally()
@@ -685,10 +595,10 @@ We can either
 - use a function that summarises all the original variables into PCs and plots the cluster ids.  
 
 ```{r cluster x variable boxplots}
-weather %>%
+vi %>%
   mutate(cluster = mod_km4$cluster,
          cluster = factor(cluster)) %>%
-  pivot_longer(!c(year,site,cluster)) %>%
+  pivot_longer(!c(x, y, cluster)) %>%
   ggplot(aes(x = cluster, 
              y = value, 
              color = cluster))+
@@ -710,7 +620,7 @@ and extract cluster mean and pairwise comparison to understand what variables ha
 
 ```{r kmeans PCA plot}
 fviz_cluster(mod_km4,
-             data = weather_norm)
+             data = vi_norm)
 ```
   
 Notice how, behind the scenes, the fviz_cluster function ran a PCA and is showing us a plot with PCs 1 and 2 on the axis (same result as we obtained on the PCA analysis).   

@@ -107,9 +107,6 @@ nnet_prediction = raster::predict(s2data, model=nnet_model)
 # Apply the random forest model to the Sentinel-2 data
 rf_prediction = raster::predict(s2data, model=rf_model)
 
-# Apply the support vector machines model to the Sentinel-2 data
-svm_prediction = raster::predict(s2data, model=svm_model)
-
 # Convert the evaluation data into a spatial object using the X and Y coordinates and extract predicted values
 coords <- cbind(eva$x, eva$y) # Replace with your actual data
 eva.sp <- SpatialPointsDataFrame(coords = coords, data = eva, 
@@ -118,16 +115,15 @@ eva.sp <- SpatialPointsDataFrame(coords = coords, data = eva,
 
 ## Superimpose evaluation points on the predicted classification and extract the values
 # neural network
-nnet_Eval = extract(nnet_prediction, eva.sp)
+nnet_Eval <- raster::extract(nnet_prediction, eva.sp)
 # random forest
-rf_Eval = extract(rf_prediction, eva.sp)
-# support vector machines
-svm_Eval = extract((svm_prediction), eva.sp)
+rf_Eval <- raster::extract(rf_prediction, eva.sp)
+
 
 # Create an error matrix for each of the classifiers
 nnet_errorM = confusionMatrix(as.factor(nnet_Eval),as.factor(eva$class)) # nnet is a poor classifier, so it will not capture all the classes
 rf_errorM = confusionMatrix(as.factor(rf_Eval),as.factor(eva$class))
-svm_errorM = confusionMatrix(as.factor(svm_Eval),as.factor(eva$class))
+
 
 
 # Plot the results next to one another along with the 2018 NMD dataset for comparison

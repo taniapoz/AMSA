@@ -1,0 +1,112 @@
+---
+title: "Machine Learning"
+format: html
+---
+
+# For all bands
+
+```{r}
+library(raster)
+library(caret)
+library(sp)
+library(nnet)
+library(randomForest)
+library(kernlab)
+library(e1071)
+library(tidyverse)
+library(sf)
+```
+
+```{r}
+#Load the Sentinel-2 stack of the study area
+s2data = stack("../data/S2StackSmall.tif")
+
+#Name the layers of the Sentinel-2 stack based on previously saved information
+names(s2data) = as.character(read.csv("../data/S2StackSmall_Names.csv")[,1])
+
+#Load sample data
+samples = read.csv("../data/Samples.csv")
+```
+
+
+```{r split data}
+# Splitting the data frame into 70-30 by class
+trainx = list(0)
+evalx = list(0)
+for (i in 1:8){ # loop through all eight classes
+  cls = samples[samples$class == i,]
+  smpl <- floor(0.70 * nrow(cls))
+  tt <- sample(seq_len(nrow(cls)), size = smpl)
+  trainx[[i]] <- cls[tt,]
+  evalx[[i]] <- cls[-tt,]
+}
+
+# combining them all into training and evaluation data frames
+trn = do.call(rbind, trainx) 
+eva = do.call(rbind, evalx)
+```
+
+
+```{r set up resamplig method}
+# Setting up a resampling method in the model training process
+tc <- trainControl(method = "repeatedcv", # repeated cross-validation of the training data
+                   number = 10, 
+                   repeats = 5, 
+                   allowParallel = TRUE, 
+                   verboseIter = TRUE)
+```
+
+```{r training models}
+# Training the neural network model
+nnet_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "nnet", metric="Accuracy", trainControl = tc, tuneGrid = nnet.grid)
+
+# Training the random forest model
+rf_model <- caret::train(x = trn[,(5:ncol(trn)-1)], y = as.factor(as.integer(as.factor(trn$class))),
+                    method = "rf", metric="Accuracy", trainControl = tc, tuneGrid = rf.grid)
+```
+
+```{r apply model to data}
+# Applying the neural network model to the Sentinel-2 data. 
+nnet_prediction = raster::predict(s2data, model=nnet_model)
+
+# Applying the random forest model to the Sentinel-2 data
+rf_prediction = raster::predict(s2data, model=rf_model)
+
+```
+
+  
+
+```{r extracting values}
+# Converting the evaluation data into a spatial object using the X and Y coordinates and extract predicted values
+coords <- cbind(eva$x, eva$y)
+eva.sp <- SpatialPointsDataFrame(coords = coords, data = eva, 
+                                 proj4string = CRS(proj4string(nnet_prediction)))
+
+#evaluation points on the predicted classification and extract the values
+# neural network
+# neural network
+nnet_Eval <- raster::extract(nnet_prediction, eva.sp)
+# random forest
+rf_Eval <- raster::extract(rf_prediction, eva.sp)
+```
+
+```{r error matrix}
+# Creating an error matrix for each of the classifiers
+nnet_errorM = confusionMatrix(as.factor(nnet_Eval),as.factor(eva$class))
+rf_errorM = confusionMatrix(as.factor(rf_Eval),as.factor(eva$class))
+
+```
+
+
+```{r plotting}
+# Plotting the results next to one another along with the 2018 NMD dataset for comparison
+nmd2018 <- raster("../data/NMD_S2Small.tif")
+crs(nmd2018) <- crs(nnet_prediction)
+rstack <- stack(nmd2018, nnet_prediction, rf_prediction)
+names(rstack) <- c("NMD 2018", "Single Layer Neural Network", "Random Forest")
+output_plot <- "../output/rstack_plot.png"  # Modify the path as needed
+png(filename = output_plot, width = 800, height = 600)  # You can adjust width and height
+plot(rstack)
+```
+
